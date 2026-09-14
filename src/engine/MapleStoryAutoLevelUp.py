@@ -1538,8 +1538,15 @@ class MapleStoryAutoBot:
             if time.time() - self.t_last_attack > cooldown and attack_direction is not None:
                 self.cmd_action = "attack"
                 self.t_last_attack = time.time()
-                # Set up attack direction
-                self.cmd_move_x = attack_direction
+                # Only take over the walking direction when the route has not
+                # asked for one. Turning toward the target is worth it while
+                # standing still, but overriding the route fights it: on a map
+                # where detection misfires the character is pushed back as often
+                # as forward and never covers the last pixels into a jump band,
+                # so it stalls a step short of changing level. The route already
+                # sweeps both ways, so mobs on either side still get hit.
+                if self.cmd_move_x == "none":
+                    self.cmd_move_x = attack_direction
 
     def update_cmd_by_random(self):
         '''
