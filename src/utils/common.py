@@ -397,62 +397,100 @@ def get_minimap_loc_size(img_frame):
     Detects the location and size of the minimap within the game frame.
 
     The function works by:
-    - Thresholding the image get pure white(255,255,255) pixels.
-    - Using connected components to find white-bordered regions.
-    - Filtering candidates based on expected minimap size and margin rules:
-        - Top, bottom, left, right margins must be 1px white lines.
+    - Restricting search to the top-left region of the game frame.
+    - Using thresholding and connected components to find minimap border candidate regions.
+    - Selecting the primary minimap candidate box (the whole minimap widget).
+    - Stripping the widget chrome (title bar, frame lines, bottom UI bar) by keeping
+      the largest connected block of non-chrome pixels inside it, which is the map area.
+
+    The chrome must not be included in the returned box: it is a high contrast pattern
+    that moves with the crop instead of with the world, so it hijacks the minimap
+    template matching and gets baked into the stitched map.png.
 
     Returns:
-        (x, y, w, h): Top-left coordinate and width/height of the minimap.
+        (x, y, w, h): Top-left coordinate and width/height of the minimap content.
                     Returns None if not found.
     '''
-    white = np.array([255, 255, 255])
+    h_frame, w_frame = img_frame.shape[:2]
+    roi_h = int(h_frame * 0.45)
+    roi_w = int(w_frame * 0.35)
+    roi = img_frame[:roi_h, :roi_w]
 
-    # Mask for pure white
-    mask_white = cv2.inRange(img_frame, white, white)
+    lower_white = np.array([140, 140, 140])
+    upper_white = np.array([255, 255, 255])
 
-    # Connected components with stats
+    # Mask for white/silver UI border
+    mask_white = cv2.inRange(roi, lower_white, upper_white)
+
     num_labels, labels, stats, centroids = \
         cv2.connectedComponentsWithStats(mask_white, connectivity=8)
 
-    # Loop over components (skip label 0, which is background)
+    candidates = []
     for i in range(1, num_labels):
         x0, y0, rw, rh, area = stats[i]
 
-        # Filter out small blobs
-        if rw < 100 or rh < 100:
+        if rw < 50 or rh < 50:
+            continue
+        if x0 > roi_w * 0.8 or y0 > roi_h * 0.8:
             continue
 
-        x1 = x0 + rw - 1
-        y1 = y0 + rh - 1
+        ratio = float(rw) / rh
+        if 0.3 <= ratio <= 3.5:
+            candidates.append((x0, y0, rw, rh, area))
 
-        # Check 1px white top and bottom margins
-        if not (np.all(img_frame[y0, x0:x0+rw] == white) and \
-                np.all(img_frame[y1, x0:x0+rw] == white)):
-            continue
+    if candidates:
+        candidates.sort(key=lambda c: c[4], reverse=True)
+        x0, y0, rw, rh, _ = candidates[0]
 
-        # Check 1px white left and right margins
-        # Ensures the candidate region is framed by white borders like the minimap
-        if not (np.all(img_frame[y0:y0+rh, x0] == white) and \
-                np.all(img_frame[y0:y0+rh, x1] == white)):
-            continue
+        # Strip the widget chrome. The title bar, the frame lines and the bottom
+        # UI bar are all bright, while the map area is dark, so the map area is
+        # the largest connected block of non-bright pixels inside the widget.
+        box = img_frame[y0:y0+rh, x0:x0+rw]
+        mask_content = (~np.all(box >= lower_white, axis=2)).astype(np.uint8)
 
-        # Create a mask of non-white pixels
-        mask_minimap = np.any(img_frame[y0:y0+rh, x0:x0+rw] != white, axis=2).astype(np.uint8)
+        num_blobs, _, blob_stats, _ = \
+            cv2.connectedComponentsWithStats(mask_content, connectivity=4)
+        if num_blobs <= 1:
+            return None  # widget is all chrome, no map area inside
 
-        # Find bounding box of mask_minimap
-        coords = cv2.findNonZero(mask_minimap)
-        if coords is None:
-            continue  # skip empty block
-        x_minimap, y_minimap, w_minimap, h_minimap = cv2.boundingRect(coords)
+        # Skip label 0 (the chrome itself) and take the biggest dark blob
+        idx = 1 + int(np.argmax(blob_stats[1:, cv2.CC_STAT_AREA]))
+        x_inner, y_inner, w_inner, h_inner = blob_stats[idx, :4]
+        inner = box[y_inner:y_inner+h_inner, x_inner:x_inner+w_inner]
 
-        # Offset by original x0, y0 to get coords in original image
-        x_minimap += x0
-        y_minimap += y0
+        # The widget also has darker bevel lines that the brightness test above
+        # does not catch. They are flat single color lines, while real minimap
+        # edges never are, so eat the edges inward while they stay flat. A flat
+        # line carries no information for template matching, so trimming one is
+        # free even on the rare frame where it belongs to the map.
+        #
+        # Deliberately an exact single color test rather than a variance one.
+        # What matters downstream is not that every last chrome pixel is gone,
+        # but that this function returns the SAME crop size on every frame, so
+        # the crop keeps matching the map.png that was built from it. A variance
+        # threshold makes the trim depend on where the bevel gradient happens to
+        # sit relative to the cut-off, which is not stable.
+        h_in, w_in = inner.shape[:2]
+        top, bottom, left, right = 0, h_in, 0, w_in
+        min_h, min_w = int(h_in * 0.75), int(w_in * 0.75)
+        is_flat = lambda line: bool(np.all(line == line[0]))
+        while bottom - top > min_h and is_flat(inner[top, left:right]):
+            top += 1
+        while bottom - top > min_h and is_flat(inner[bottom-1, left:right]):
+            bottom -= 1
+        while right - left > min_w and is_flat(inner[top:bottom, left]):
+            left += 1
+        while right - left > min_w and is_flat(inner[top:bottom, right-1]):
+            right -= 1
 
-        return x_minimap, y_minimap, w_minimap, h_minimap
+        x_inner, y_inner = x_inner + left, y_inner + top
+        w_inner, h_inner = right - left, bottom - top
 
-    # logger.warning("Minimap not found in the game frame.")
+        if h_inner > 20 and w_inner > 20:
+            return x0 + x_inner, y0 + y_inner, w_inner, h_inner
+
+        return None  # dark blob too small to be the minimap
+
     return None  # minimap not found
 
 def get_player_location_on_minimap(img_minimap, minimap_player_color=(136, 255, 255)):
@@ -460,27 +498,38 @@ def get_player_location_on_minimap(img_minimap, minimap_player_color=(136, 255, 
     Detects the player's position on the minimap.
 
     The function works by:
-    - Creating a binary mask of all pixels in the minimap that match the configured
-    player color exactly.
-    - Verifying that at least 4 matching pixels are found (to avoid false positives).
-    - Computing the average of these pixel coordinates to determine the center of
-    the player icon on the minimap.
+    - Creating a binary mask of the pure yellow player marker.
+    - Taking the largest connected blob of it, so a second yellow marker elsewhere
+      on the minimap cannot drag the result to a point between the two.
+    - Returning that blob's centroid.
+
+    An exact match on minimap_player_color is too strict: the marker is only a
+    couple of pixels wide and antialiasing eats into it, and the clients disagree
+    on the core color (Artale draws (136,255,255), the classic client (0,255,255)).
+    So the blue channel is matched loosely up to minimap_player_color while green
+    and red must be saturated. Terrain highlights top out around 187, well below
+    that floor, so they cannot be mistaken for the marker.
 
     Returns:
         (x, y): The player's location in minimap coordinates as a tuple.
-                Returns None if not enough matching pixels are found.
+                Returns None if the marker is not found.
     """
-    mask = cv2.inRange(img_minimap,
-                        minimap_player_color,
-                        minimap_player_color)
-    coords = cv2.findNonZero(mask)
-    if coords is None or len(coords) < 4:
+    lower = np.array([0, 240, 240], dtype=np.uint8)
+    upper = np.array([min(255, minimap_player_color[0] + 24), 255, 255], dtype=np.uint8)
+    mask = cv2.inRange(img_minimap, lower, upper)
+
+    num_blobs, _, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if num_blobs <= 1:
         # logger.warning(f"Fail to locate player location on minimap.")
         return None
 
-    # Calculate the average location of the matching pixels
-    avg = coords.mean(axis=0)[0]  # shape (1,2), so we take [0]
-    loc_player_minimap = (int(round(avg[0])), int(round(avg[1])))
+    # Skip label 0 (the background) and take the biggest marker blob
+    idx = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    if stats[idx, cv2.CC_STAT_AREA] < 2:
+        return None
+
+    x_center, y_center = centroids[idx]
+    loc_player_minimap = (int(round(x_center)), int(round(y_center)))
 
     return loc_player_minimap
 
@@ -503,7 +552,9 @@ def get_all_other_player_locations_on_minimap(img_minimap, red_bgr=(0, 0, 255)):
         if coords is not None and len(coords) >= 3:
             logger.debug(f"Found {len(coords)} red pixels with tolerance {tolerance}")
             logger.debug(f"Color range: {lower_bgr} to {upper_bgr}")
-            return [tuple(pt[0]) for pt in coords]  # List of (x, y)
+            # findNonZero returns (N,1,2) on OpenCV 4 but (N,2) on OpenCV 5,
+            # so flatten instead of indexing a per point wrapper that may not exist
+            return [(int(x), int(y)) for x, y in coords.reshape(-1, 2)]  # List of (x, y)
 
     # 如果所有容錯範圍都檢測不到，記錄調試信息
     logger.debug(f"Red dot detection failed with all tolerances: {tolerances}")
@@ -832,16 +883,19 @@ def normalize_pixel_coordinate(coord, window_size):
     return (norm_x, norm_y)
 
 def resize_window(window_title, width=1296, height=759):
-    # 取得視窗句柄
-    hwnd = win32gui.FindWindow(None, window_title)
-    if hwnd == 0:
-        print(f"找不到視窗: {window_title}")
-        return
+    try:
+        # 取得視窗句柄
+        hwnd = win32gui.FindWindow(None, window_title)
+        if hwnd == 0:
+            print(f"找不到視窗: {window_title}")
+            return
 
-    # 取得目前視窗位置
-    rect = win32gui.GetWindowRect(hwnd)
-    x, y = rect[0], rect[1]  # 保持視窗左上角位置不變
+        # 取得目前視窗位置
+        rect = win32gui.GetWindowRect(hwnd)
+        x, y = rect[0], rect[1]  # 保持視窗左上角位置不變
 
-    # 調整視窗大小
-    win32gui.MoveWindow(hwnd, x, y, width, height, True)
-    print(f"已將「{window_title}」調整為 {width}x{height}")
+        # 調整視窗大小
+        win32gui.MoveWindow(hwnd, x, y, width, height, True)
+        print(f"已將「{window_title}」調整為 {width}x{height}")
+    except Exception as e:
+        logger.warning(f"[resize_window] Unable to resize window '{window_title}': {e}")

@@ -312,7 +312,11 @@ class RouteRecorder():
 
         # Get minimap from game window
         if self.is_first_frame:
-            x, y, w, h = get_minimap_loc_size(self.img_frame)
+            res = get_minimap_loc_size(self.img_frame)
+            if res is None:
+                logger.warning("[routeRecorder] Minimap white border not detected yet, retrying...")
+                return -1
+            x, y, w, h = res
             # Discard 1 pixel boundary of the minimap
             x += 1
             y += 1
@@ -402,6 +406,8 @@ class RouteRecorder():
 
         # Get player location on global map
         self.loc_player_global = self.get_player_location_on_global_map()
+        if self.is_first_frame:
+            self.loc_player_global_last = self.loc_player_global
 
         # Determine which color code to use based on user input
         action = ""
