@@ -113,15 +113,33 @@ class HealthMonitor:
 
         contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        loc_size_bars = []
+        # HP, MP and EXP are three white outlined boxes side by side on one row.
+        # Match them by that shared arrangement rather than by an absolute size:
+        # how many pixels they occupy depends on the client and on the window
+        # size the frame was captured at. The classic client draws them 95x14 at
+        # one window size and 148x14 at another, and the old filter
+        # (4 < w/h < 10 and 2500 < w*h < 5000) rejected both. Whenever it did not
+        # end up with exactly three, this returned None, HP/MP/EXP stayed pinned
+        # at their initial 100%, and no potion was ever drunk however low HP got.
+        candidates = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
-            # for game window resolution 752x1282, w/h == 7.5, w*h == 3630
-            if 4 < w/h < 10 and 2500 < w*h < 5000:
-                loc_size_bars.append((x, y, w, h))
+            if 5 <= h <= 30 and 50 <= w <= 400 and w / h > 3:
+                candidates.append((x, y, w, h))
 
-        # sort contours by x coordinate
-        loc_size_bars = sorted(loc_size_bars, key=lambda bar: bar[0])
+        # Keep the row that holds exactly three of them
+        loc_size_bars = []
+        for _, y, _, _ in candidates:
+            row = sorted((c for c in candidates if abs(c[1] - y) <= 3),
+                         key=lambda bar: bar[0])
+            if len(row) == 3:
+                # A bar whose outline is broken by overlapping text gives a short
+                # bounding box; sample every bar at the row's full height so the
+                # read still lands inside the bar.
+                h_row = max(bar[3] for bar in row)
+                loc_size_bars = [(bx, by, bw, h_row) for bx, by, bw, _ in row]
+                break
+
         if len(loc_size_bars) != 3:
             return (None, None, None)
 
