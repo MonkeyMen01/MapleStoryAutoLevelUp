@@ -15,14 +15,23 @@ nametag:
   diff_thres: 0.2            # 只有 offset[1] 會被用到，offset[0] 引擎沒讀
 
 bot:
-  mode: "normal"        # 模式: "normal"
+  mode: "normal"        # 跟著 route*.png 跑，會自己上下換平台。
+                        # "patrol" 則完全不看地圖、只在原平台來回走並定時攻擊 —— 不會換層，
+                        # 適合定點練功；這張圖試過，會動但不找怪
   attack: "directional" # 法師方向性技能 (魔力爪)
   map: "south_forest_training_ground_1"  # 南部森林訓練場1
+
+patrol:
+  patrol_attack_interval: 2.2  # 實測 1.2 秒會在 45 秒內把 350 的魔力池抽乾(喝了 3 次藥還是見底)，
+                               # MP 一歸零魔力爪就放不出來、等於空揮。
+                               # 2.2 秒約是 1.2 秒的一半頻率，讓藥水跟得上
+  range: [0.25, 0.75]          # 稍微縮一點，避免走到畫面邊緣掉下平台
 
 key:
   directional_attack: "w"   # ⚔️ W 鍵為魔力爪
   teleport: ""              # 🌀 目前尚未學習瞬間移動，設為 ""
-  jump: "space"             # 🦘 Space 為跳躍
+  jump: "alt"               # 🦘 經典版跳躍鍵是 Alt，不是 Space。
+                            # 下跳 = 方向鍵下 + Alt，引擎會自己組合這兩個鍵
   add_hp: "1"               # ❤️ 1 鍵為 HP 藥水
   add_mp: "2"               # 💧 2 鍵為 MP 藥水
   party: "p"
@@ -47,7 +56,10 @@ monster_detect:
 
 health_monitor:
   enable: True
-  add_hp_percent: 60
-  add_mp_percent: 40
+  add_hp_percent: 25   # 藥水一次補 300、滿血才 240，所以每瓶都是滿補。
+                       # 門檻越低喝得越少：60% 是每掉 96 血喝一瓶，25% 是每掉 180 血喝一瓶。
+                       # 沒有設到 20 是因為 25% = 60 HP，留兩三下被打的緩衝，
+                       # 而偵測到低血到實際按下去之間有 add_hp_cooldown 的延遲
+  add_mp_percent: 70   # 藍水一瓶只回約 24 點(350 的 6.8%)，從 40% 開始補追不上魔力爪的消耗
   add_hp_cooldown: 0.5
   add_mp_cooldown: 0.5
