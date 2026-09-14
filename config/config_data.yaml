@@ -23,7 +23,9 @@ eng_to_cn:
   black_mountain: 烏山深處
   disposed_flower_garden: 暗影花園
   mu_Lung_wild_bear_area_2: 野熊的領土2
+  south_forest_training_ground_1: 南部森林訓練場1
   # monster
+  slime: 綠水靈
   zombie_lupin: 天使猴
   black_axe_stump: 黑斧木妖
   brown_windup_bear: 褐色發條熊
@@ -77,3 +79,4 @@ map_mobs_mapping:
   black_mountain: [hodori, moon_bunny, black_axe_stump]
   disposed_flower_garden: [nependeath, dark_nependeath]
   mu_Lung_wild_bear_area_2: [grizzly, panda]
+  south_forest_training_ground_1: [slime]

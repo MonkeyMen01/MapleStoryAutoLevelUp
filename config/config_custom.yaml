@@ -1,0 +1,53 @@
+# ====== Customized Configuration for 新楓之谷：經典版 (法師 Mage - 無瞬移) ======
+
+game_window:
+  title: "新楓之谷：經典版"
+  size: [691, 1278]          # 去掉標題列(59px)後的原始視窗尺寸，用來做尺寸驗證。
+                             # 注意：除錯視窗的 "Resolution:" 印的是含標題列的原始值(750x1278)，
+                             # 而 get_img_frame 最後一律縮放成 1296x700 給引擎用，
+                             # 所以 ui_coords 這類座標都是對 1296x700 校的，不要跟著改
+
+nametag:
+  enable: True               # 經典版沒有隊伍紅條，只能用名牌定位
+  name: "Stackover"          # nametag/Stackover.png，從 21:49:51 的截圖裁出 (59x19)
+  mode: "grayscale"          # white_mask 實測會崩掉（分數 0.93~1.0），不要改
+  offset: [-50, 32]          # offset[1]=32：名牌上緣往上 32px 是角色中心（實測 y531 vs 499）
+  diff_thres: 0.2            # 只有 offset[1] 會被用到，offset[0] 引擎沒讀
+
+bot:
+  mode: "normal"        # 模式: "normal"
+  attack: "directional" # 法師方向性技能 (魔力爪)
+  map: "south_forest_training_ground_1"  # 南部森林訓練場1
+
+key:
+  directional_attack: "w"   # ⚔️ W 鍵為魔力爪
+  teleport: ""              # 🌀 目前尚未學習瞬間移動，設為 ""
+  jump: "space"             # 🦘 Space 為跳躍
+  add_hp: "1"               # ❤️ 1 鍵為 HP 藥水
+  add_mp: "2"               # 💧 2 鍵為 MP 藥水
+  party: "p"
+
+buff_skill:
+  keys: []                  # 目前若尚無 Buff 技能暫留空
+  cooldown: []
+  action_cooldown: 1
+
+directional_attack:
+  range_x: 350
+  range_y: 70
+  cooldown: 0.9
+
+monster_detect:
+  mode: "color"        # 預設的 contour_only 在經典版是 0 偵測：它靠純黑(0,0,0)輪廓比對，
+                       # 但這個客戶端的怪物輪廓有反鋸齒、幾乎沒有純黑像素
+  diff_thres: 0.35     # 預設 0.8 對 color 模式是災難：單幀 99 萬個原始比對，
+                       # NMS 是 O(n²) 會讓 bot 卡死。0.35 是實測的精度最佳點(73%)，
+                       # 再收緊會開始漏怪(0.28 只剩 3 個偵測)
+  search_box_margin: 20  # 預設 50 讓搜尋框變成 800x240，多出來的都是背景樹葉(誤判來源)
+
+health_monitor:
+  enable: True
+  add_hp_percent: 60
+  add_mp_percent: 40
+  add_hp_cooldown: 0.5
+  add_mp_cooldown: 0.5
