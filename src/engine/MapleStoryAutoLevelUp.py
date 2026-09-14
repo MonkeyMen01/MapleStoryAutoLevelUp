@@ -890,10 +890,18 @@ class MapleStoryAutoBot:
 
         # Detect monster via health bar
         if self.cfg["monster_detect"]["with_enemy_hp_bar"]:
-            # Create color mask for Monsters' HP bar
+            # Create color mask for Monsters' HP bar.
+            # Allow a little slack rather than demanding the exact configured
+            # colour: the bar is drawn antialiased, so the classic client shows
+            # it as both (0,243,0) and (1,243,1) from frame to frame, and an
+            # exact match drops half the sightings of what is otherwise the most
+            # trustworthy signal available - a health bar only ever appears over
+            # a real monster, while template matching keeps finding foliage.
+            bar = np.array(self.cfg["monster_detect"]["hp_bar_color"], dtype=np.int16)
+            tol = 6
             mask = cv2.inRange(img_roi,
-                               np.array(self.cfg["monster_detect"]["hp_bar_color"]),
-                               np.array(self.cfg["monster_detect"]["hp_bar_color"]))
+                               np.clip(bar - tol, 0, 255).astype(np.uint8),
+                               np.clip(bar + tol, 0, 255).astype(np.uint8))
 
             # Find connected components (each cluster of green pixels)
             num_labels, labels, stats, centroids = \
