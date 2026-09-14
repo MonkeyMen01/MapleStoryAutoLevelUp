@@ -18,6 +18,7 @@ if is_mac():
     import Quartz
 else:
     import pygetwindow as gw
+    from src.input import scancode
 
 pyautogui.PAUSE = 0  # remove delay
 
@@ -25,6 +26,11 @@ def key_down(key):
     '''
     Press key down
     '''
+    # Prefer a hardware scancode: clients that read the keyboard through
+    # DirectInput or raw input ignore pyautogui's virtual key codes entirely,
+    # which looks exactly like a working bot whose character never moves.
+    if not is_mac() and scancode.send_key(key, True):
+        return
     try:
         pyautogui.keyDown(key)
     except pyautogui.FailSafeException:
@@ -35,6 +41,8 @@ def key_up(key):
     '''
     Release key
     '''
+    if not is_mac() and scancode.send_key(key, False):
+        return
     try:
         pyautogui.keyUp(key)
     except pyautogui.FailSafeException:
