@@ -768,6 +768,18 @@ class MapleStoryAutoBot:
         monsters = []
         for monster_name, monster_imgs in self.monsters_info.items():
             for img_monster, mask_monster in monster_imgs:
+                # cv2.matchTemplate asserts rather than scoring badly when the
+                # template is larger than the image, and the search box does get
+                # that small: it is clipped at the frame edges, and while the
+                # name tag has not locked on yet loc_player still holds its
+                # placeholder, which puts the box mostly off screen. Only
+                # contour_only guarded against this, so grayscale and color blew
+                # up the whole bot thread. Skip the template that does not fit
+                # and let the others still run.
+                if img_monster.shape[0] > img_roi.shape[0] or \
+                   img_monster.shape[1] > img_roi.shape[1]:
+                    continue
+
                 if self.cfg["bot"]["mode"] == "patrol":
                     pass # Don't detect monster using template in patrol mode
                 elif self.cfg["monster_detect"]["mode"] == "template_free":
@@ -1477,6 +1489,15 @@ class MapleStoryAutoBot:
             self.cmd_action = "jump"
 
     def update_cmd_by_mob_detection(self):
+        # A jump asked for by the route is a navigation instruction, not a
+        # preference. Overwriting it with an attack strands the character on its
+        # current platform: it reaches the jump band, attacks instead, walks on,
+        # and never changes level. Attacks are on a cooldown anyway, so giving
+        # up this one frame costs almost nothing, and skipping the template
+        # matching on jump frames makes the loop faster where it matters.
+        if self.cmd_action == "jump":
+            return
+
         # Get monster search box
         margin = self.cfg["monster_detect"]["search_box_margin"]
         if self.cfg["bot"]["attack"] == "aoe_skill":
